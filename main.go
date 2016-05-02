@@ -30,11 +30,12 @@ func init() {
 }
 
 type Week struct {
-	Running      []string
-	RunningTotal float64
-	Cycling      []string
-	CyclingTotal float64
-	Swimming     []string
+	Running       []string
+	RunningTotal  float64
+	Cycling       []string
+	CyclingTotal  float64
+	Swimming      []string
+	SwimmingTotal float64
 }
 
 func main() {
@@ -43,10 +44,22 @@ func main() {
 	client := strava.NewClient(stravaToken)
 	service := strava.NewCurrentAthleteService(client)
 
+	athlete, err := service.Get().Do()
+	if err != nil {
+		log.Fatalf("Failed to retrieve athlete: %s", err)
+	}
+	stats, err := strava.NewAthletesService(client).Stats(athlete.Id).Do()
+	if err != nil {
+		log.Fatalf("Failed to retrieve athlete stats: %s", err)
+	}
+
+	cyclingYTD := stats.YTDRideTotals.Distance * metersToMiles
+
 	today := time.Now().Round(time.Hour * 24)
-	tomorrow := int(today.AddDate(0, 0, 1).Unix())
-	lastWeek := int(today.AddDate(0, 0, -7).Unix())
-	activities, err := service.ListActivities().Before(tomorrow).After(lastWeek).Do()
+	lastSunday := today.AddDate(0, 0, int(time.Sunday-today.Weekday()))
+	thisMonday := int(today.AddDate(0, 0, int(time.Monday-today.Weekday())).Unix())
+	lastWeek := int(lastSunday.AddDate(0, 0, -7).Unix())
+	activities, err := service.ListActivities().Before(thisMonday).After(lastWeek).Do()
 	if err != nil {
 		log.Fatalf("Failed to retrieve activities: %s", err)
 	}
@@ -71,6 +84,16 @@ func main() {
 			s += fmt.Sprintf(", %2.1f MPH", activity.AverageSpeed*mpsTomph)
 			week.Cycling = append(week.Cycling, s)
 			week.CyclingTotal += activity.Distance * metersToMiles
+		case "Swim":
+			s = fmt.Sprintf(`[url="%s"]%s[/url]: %s, %4.2f meters`,
+				url,
+				activity.StartDate.Format("01/02/2006"),
+				time.Duration(activity.ElapsedTime)*time.Second,
+				activity.Distance,
+			)
+			week.Swimming = append(week.Swimming, s)
+			week.SwimmingTotal += activity.Distance
+
 		}
 
 	}
@@ -78,16 +101,29 @@ func main() {
 	sort.Sort(sort.Reverse(sort.StringSlice(week.Running)))
 	sort.Sort(sort.Reverse(sort.StringSlice(week.Cycling)))
 
-	fmt.Print("[b]Running[/b]\n\n[fixed]")
-	for _, activity := range week.Running {
-		fmt.Println(activity)
+	if len(week.Running) > 0 {
+		fmt.Print("[b]Running[/b]\n\n[fixed]")
+		for _, activity := range week.Running {
+			fmt.Println(activity)
+		}
+		fmt.Printf("[/fixed]\n[b]Weekly Total:[/b] %2.2f miles\n\n", week.RunningTotal)
 	}
-	fmt.Printf("[/fixed]\n[b]Weekly Total:[/b] %2.2f miles\n\n", week.RunningTotal)
 
-	fmt.Print("[b]Cycling[/b]\n\n[fixed]")
-	for _, activity := range week.Cycling {
-		fmt.Println(activity)
+	if len(week.Cycling) > 0 {
+		fmt.Print("[b]Cycling[/b]\n\n[fixed]")
+		for _, activity := range week.Cycling {
+			fmt.Println(activity)
+		}
+		fmt.Printf("[/fixed]\n[b]Weekly Total:[/b] %2.2f miles\n", week.CyclingTotal)
+		fmt.Printf("[/fixed]\n[b]YTD Total:[/b] %2.2f miles\n\n", cyclingYTD)
 	}
-	fmt.Printf("[/fixed]\n[b]Weekly Total:[/b] %2.2f miles\n", week.CyclingTotal)
+
+	if len(week.Swimming) > 0 {
+		fmt.Print("[b]Swimming[/b]\n\n[fixed]")
+		for _, activity := range week.Swimming {
+			fmt.Println(activity)
+		}
+		fmt.Printf("[/fixed]\n[b]Weekly Total:[/b] %2.2f meters\n\n", week.SwimmingTotal)
+	}
 
 }
